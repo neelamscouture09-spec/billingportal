@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Next.js
+.next/
+**/.next/
+out/
+
+# Build files
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+
+# Local files
+.DS_Store
+*.tsbuildinfo
+
+# Vercel
+.vercel/

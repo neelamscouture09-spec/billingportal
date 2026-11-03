@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Product {
+  id             String        @id @default(uuid())
+  name           String
+  size           String
+  category       String
+  sellingPrice   Decimal       @db.Decimal(12, 2)
+  barcode        String        @unique
+  openingStock   Int?
+  sold           Boolean       @default(false)
+  onTrial        Boolean       @default(false)
+  trialItems     TrialItem[]
+  returnStatus   String        @default("NOT_RETURNED") @db.VarChar(20)
+  supplierCodeId String?
+  supplierCode   SupplierCode? @relation(fields: [supplierCodeId], references: [id], onDelete: Restrict)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([name])
+  @@index([category])
+  @@index([supplierCodeId])
+  @@index([sold])
+  @@index([onTrial])
+  @@index([returnStatus])
+  @@map("products")
+}
+
+model BarcodeCounter {
+  key        String @id
+  lastNumber Int    @default(0)
+
+  @@map("barcode_counters")
+}
+
+model Supplier {
+  id        String         @id @default(uuid())
+  name      String         @unique @db.VarChar(180)
+  codes     SupplierCode[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@map("suppliers")
+}
+
+model SupplierCode {
+  id         String   @id @default(uuid())
+  code       String   @db.VarChar(80)
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  products   Product[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([supplierId, code])
+  @@index([supplierId])
+  @@map("supplier_codes")
+}
+
+model InvoiceCounter {
+  dateKey    String @id @db.VarChar(8)
+  lastNumber Int    @default(0)
+
+  @@map("invoice_counters")
+}
+
+model CheckoutInvoice {
+  id                   String   @id @default(uuid())
+  requestId            String   @unique @db.VarChar(100)
+  invoiceNumber        String   @unique @db.VarChar(40)
+  invoiceDate          DateTime @default(now())
+  invoiceDateKey       String   @db.VarChar(8)
+  invoiceSequence      Int
+  customerName         String   @db.VarChar(200)
+  customerPhone        String   @db.VarChar(30)
+  customerEmail        String   @db.VarChar(250)
+  customerAddress      String   @db.Text
+
+  subtotalPaise        BigInt
+  productDiscountPaise BigInt
+  billDiscountMode     String   @db.VarChar(10)
+  billDiscountValue    Decimal  @db.Decimal(14, 2)
+  billDiscountPaise    BigInt
+
+  // Returned merchandise credit: whole-invoice amount, in paise.
+  // It is separate from product discounts and the bill discount.
+  returnedDiscountPaise BigInt   @default(0)
+
+  totalDiscountPaise   BigInt
+  totalPaise           BigInt
+  paidPaise            BigInt
+  changePaise          BigInt
+  paymentStatus        String   @default("PAID") @db.VarChar(15)
+  createdAt            DateTime @default(now())
+  items                CheckoutItem[]
+  tenders              CheckoutTender[]
+  returnCredits         ReturnCredit[]
+  returnBatches         ReturnBatch[]
+  trialSettlement       TrialInvoice? @relation("TrialFinalCheckout")
+
+  @@unique([invoiceDateKey, invoiceSequence])
+  @@index([invoiceDate])
+  @@map("checkout_invoices")
+}
+
+model CheckoutItem {
+  id                   String          @id @default(uuid())
+  invoiceId            String
+  invoice              CheckoutInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId            String
+  productName          String          @db.VarChar(200)
+  barcode              String          @db.VarChar(80)
+  size                 String          @db.VarChar(50)
+  category             String          @db.VarChar(100)
+  supplierName         String?         @db.VarChar(180)
+  supplierCode         String?         @db.VarChar(80)
+  supplierCodeId       String?
+  quantity             Int
+  unitPricePaise       BigInt
+  grossPaise           BigInt
+
+  // Never nullable: all items carry a discount amount, mode, and input value.
+  // For no discount: 0 paise, mode=fixed, value=0.00.
+  productDiscountPaise BigInt          @default(0)
+  discountMode         String          @default("fixed") @db.VarChar(10)
+  // fixed = rupees; percent = percentage, both 2 decimal places.
+  discountValue        Decimal         @default(0) @db.Decimal(14, 2)
+  netPaise             BigInt
+  returnLines          ReturnLine[]
+
+  @@index([invoiceId])
+  @@index([productId])
+  @@map("checkout_items")
+}
+
+model CheckoutTender {
+  id          String          @id @default(uuid())
+  invoiceId   String
+  invoice     CheckoutInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  method      String          @db.VarChar(30)
+  amountPaise BigInt
+
+  @@index([invoiceId])
+  @@map("checkout_tenders")
+}
+
+// Each selected invoice item is returned once. Returns are not monetary refunds.
+model ReturnBatch {
+  id          String       @id @default(uuid())
+  invoiceId   String
+  invoice     CheckoutInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  createdAt   DateTime     @default(now())
+  lines       ReturnLine[]
+  credit      ReturnCredit?
+
+  @@index([invoiceId])
+  @@map("return_batches")
+}
+
+model ReturnLine {
+  id              String       @id @default(uuid())
+  batchId         String
+  batch           ReturnBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  invoiceItemId   String       @unique
+  invoiceItem     CheckoutItem @relation(fields: [invoiceItemId], references: [id], onDelete: Restrict)
+  productId       String
+  quantity        Int
+  originalPaise   BigInt
+  creditPaise     BigInt
+  includeDiscount Boolean
+  reason          String       @db.VarChar(100)
+
+  @@map("return_lines")
+}
+
+// An exchange credit can only be consumed once by a new checkout.
+model ReturnCredit {
+  id             String          @id @default(uuid())
+  batchId        String          @unique
+  batch          ReturnBatch     @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  invoiceId      String
+  invoice        CheckoutInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  amountPaise    BigInt
+  usedByInvoiceId String?        @unique
+  usedAt         DateTime?
+  createdAt      DateTime        @default(now())
+
+  @@index([invoiceId])
+  @@map("return_credits")
+}
+
+
+// Trial bills are separate from completed sales. Amounts are stored in paise.
+model TrialInvoice {
+  id                 String @id @default(uuid())
+  requestId          String @unique @db.VarChar(100)
+  trialNumber        String @unique @db.VarChar(40)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  settledAt          DateTime?
+  status             String @default("OPEN") @db.VarChar(20) // OPEN, SETTLED, CANCELLED
+  customerName       String @db.VarChar(200)
+  customerPhone      String @db.VarChar(30)
+  customerEmail      String @db.VarChar(250)
+  customerAddress    String @db.Text
+  billDiscountMode   String @default("fixed") @db.VarChar(10)
+  billDiscountValue  Decimal @default(0) @db.Decimal(14, 2) // Fixed input in rupees, percent as percentage
+  billDiscountPaise  BigInt @default(0)
+  subtotalPaise      BigInt
+  productDiscountPaise BigInt
+  totalPaise         BigInt // Initial proposed bill, not final settled total
+  finalTotalPaise    BigInt? // Only populated when settled
+  paidPaise          BigInt @default(0) // Advance payments (gross cash received)
+  refundedPaise      BigInt @default(0) // Outgoing refunds
+  balancePaise       BigInt // Open: initial total - advances. Closed: 0
+  checkoutInvoiceId  String? @unique
+  checkoutInvoice    CheckoutInvoice? @relation("TrialFinalCheckout", fields: [checkoutInvoiceId], references: [id], onDelete: Restrict)
+  items              TrialItem[]
+  payments           TrialPayment[]
+  @@index([status, createdAt])
+  @@index([customerPhone])
+  @@map("trial_invoices")
+}
+
+model TrialItem {
+  id                   String @id @default(uuid())
+  trialId              String
+  trial                TrialInvoice @relation(fields: [trialId], references: [id], onDelete: Cascade)
+  productId            String
+  product              Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  productName          String @db.VarChar(200)
+  barcode              String @db.VarChar(80)
+  size                 String @db.VarChar(50)
+  category             String @db.VarChar(100)
+  supplierName         String? @db.VarChar(180)
+  supplierCode         String? @db.VarChar(80)
+  supplierCodeId       String?
+  quantity             Int @default(1) // one Product record is one unit
+  source               String @default("TRIAL") @db.VarChar(10) // TRIAL or ADDED
+  unitPricePaise       BigInt
+  productDiscountPaise BigInt @default(0)
+  discountMode         String @default("fixed") @db.VarChar(10)
+  discountValue        Decimal @default(0) @db.Decimal(14, 2)
+  status               String @default("ON_TRIAL") @db.VarChar(20) // ON_TRIAL, KEPT, RETURNED
+  @@unique([trialId, productId])
+  @@index([productId])
+  @@map("trial_items")
+}
+
+model TrialPayment {
+  id          String @id @default(uuid())
+  trialId     String
+  trial       TrialInvoice @relation(fields: [trialId], references: [id], onDelete: Cascade)
+  method      String @db.VarChar(30)
+  amountPaise BigInt
+  kind        String @default("ADVANCE") @db.VarChar(12) // ADVANCE, SETTLEMENT, REFUND
+  createdAt   DateTime @default(now())
+  @@index([trialId])
+  @@map("trial_payments")
+}
