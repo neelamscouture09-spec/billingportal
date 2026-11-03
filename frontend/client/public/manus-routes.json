@@ -1,0 +1,1 @@
+{"routes":[{"path":"/","title":"POS / Billing"},{"path":"/products","title":"Products"},{"path":"/suppliers","title":"Suppliers"},{"path":"/returns","title":"Returns"},{"path":"/reports","title":"Reports"},{"path":"/reports/purchases/:id","title":"Purchase Details"},{"path":"/settings","title":"Settings"}]}
