@@ -8,7 +8,7 @@ import RetailLayout from "@/components/RetailLayout";
 
 import { formatINR } from "@/lib/retail";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3001").replace(/\/+$/, "");
+const API_BASE_URL = ( "https://billingportal-kappa.vercel.app/").replace(/\/+$/, "");
 
 const TIME_ZONE = "Asia/Kolkata";
 

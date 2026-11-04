@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import RetailLayout from "@/components/RetailLayout";
 import { formatINR } from "@/lib/retail";
 
-const API = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3001").replace(/\/+$/, "");
+const API = (import.meta.env.VITE_API_BASE_URL || "https://billingportal-kappa.vercel.app/").replace(/\/+$/, "");
 const methods = ["Cash", "Card", "UPI", "Bank Transfer", "Other"] as const;
 type Method = typeof methods[number];
 type PaymentRow = { id: string; method: Method; amount: string };
