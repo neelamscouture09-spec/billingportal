@@ -1,6 +1,6 @@
 
 import { NextResponse } from "next/server";
-import { Prisma } from "../../../.././../../generated/prisma/client";
+import { Prisma } from "../../../../../../generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 
 type Context = {

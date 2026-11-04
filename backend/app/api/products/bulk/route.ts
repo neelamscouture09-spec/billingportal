@@ -375,7 +375,7 @@ export async function POST(request: NextRequest) {
     const required: Field[] = [
       "name",
       "size",
-          "supplierName",
+      "supplierName",
       "supplierCode",
       "sellingPrice",
     ];
@@ -535,7 +535,7 @@ export async function POST(request: NextRequest) {
         // Both fields are required together when supplied.
         supplierName: supplierName.trim() || null,
         supplierCode:
-        supplierCode.trim().toUpperCase() || null,
+          supplierCode.trim().toUpperCase() || null,
 
         sellingPrice,
         openingStock,
@@ -760,13 +760,13 @@ export async function POST(request: NextRequest) {
                 );
 
                 createdSuppliers++;
-              } else if (
-                !usedSupplierIds.has(supplier.id)
-              ) {
-                // Count reused suppliers once.
+              } else {
+                const supplierId = supplier.id;
+
                 if (
+                  !usedSupplierIds.has(supplierId) &&
                   existingSuppliers.some(
-                    item => item.id === supplier.id
+                    item => item.id === supplierId
                   )
                 ) {
                   existingSuppliersUsed++;

@@ -4,7 +4,6 @@ import { Prisma } from "../../../generated/prisma/client";
 import { prisma } from "../../../lib/prisma";
 import { corsHeaders, corsOptions } from "../../../lib/cors";
 
-export const runtime = "nodejs";
 const json = (req: NextRequest, body: unknown, status = 200) =>
   NextResponse.json(body, { status, headers: corsHeaders(req) });
 export async function OPTIONS(req: NextRequest) { return corsOptions(req); }
