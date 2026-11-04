@@ -1,34 +1,69 @@
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "../../../../../generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "../../../../../lib/prisma";
+import {
+  corsHeaders,
+  corsOptions,
+} from "../../../../../lib/cors";
 
 type Context = {
   params: Promise<{ id: string }>;
 };
 
+// Handle browser CORS preflight requests.
+export async function OPTIONS(request: NextRequest) {
+  return corsOptions(request);
+}
+
 // POST /api/suppliers/:id/codes
 export async function POST(
-  request: Request,
+  request: NextRequest,
   { params }: Context
 ) {
-  const { id: supplierId } = await params;
+  const headers = corsHeaders(request);
+
+  const respond = (body: unknown, status = 200) =>
+    NextResponse.json(body, {
+      status,
+      headers,
+    });
 
   try {
-    const body = await request.json();
-    const code = body?.code;
+    const { id: supplierId } = await params;
+
+    let body: unknown;
+
+    try {
+      body = await request.json();
+    } catch {
+      return respond(
+        {
+          success: false,
+          error: "Invalid JSON body.",
+        },
+        400
+      );
+    }
+
+    const input =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {};
+
+    const code = input.code;
 
     if (
       typeof code !== "string" ||
       !code.trim() ||
       code.trim().length > 80
     ) {
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           error: "Supplier code must contain 1–80 characters.",
         },
-        { status: 400 }
+        400
       );
     }
 
@@ -38,9 +73,12 @@ export async function POST(
     });
 
     if (!supplier) {
-      return NextResponse.json(
-        { success: false, error: "Supplier not found." },
-        { status: 404 }
+      return respond(
+        {
+          success: false,
+          error: "Supplier not found.",
+        },
+        404
       );
     }
 
@@ -51,45 +89,52 @@ export async function POST(
       },
       include: {
         supplier: {
-          select: { id: true, name: true },
+          select: {
+            id: true,
+            name: true,
+          },
         },
       },
     });
 
-    return NextResponse.json(
-      { success: true, supplierCode },
-      { status: 201 }
+    return respond(
+      {
+        success: true,
+        supplierCode,
+      },
+      201
     );
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      return NextResponse.json(
-        { success: false, error: "Invalid JSON body." },
-        { status: 400 }
-      );
-    }
-
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === "P2002") {
-        return NextResponse.json(
+        return respond(
           {
             success: false,
             error: "This code already exists for this supplier.",
           },
-          { status: 409 }
+          409
         );
       }
+
       if (error.code === "P2003") {
-        return NextResponse.json(
-          { success: false, error: "Supplier no longer exists." },
-          { status: 404 }
+        return respond(
+          {
+            success: false,
+            error: "Supplier no longer exists.",
+          },
+          404
         );
       }
     }
 
     console.error("[CREATE SUPPLIER CODE]", error);
-    return NextResponse.json(
-      { success: false, error: "Failed to create supplier code." },
-      { status: 500 }
+
+    return respond(
+      {
+        success: false,
+        error: "Failed to create supplier code.",
+      },
+      500
     );
   }
 }

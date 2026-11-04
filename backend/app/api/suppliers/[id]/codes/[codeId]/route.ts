@@ -1,7 +1,11 @@
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "../../../../../../generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "../../../../../../lib/prisma";
+import {
+  corsHeaders,
+  corsOptions,
+} from "../../../../../../lib/cors";
 
 type Context = {
   params: Promise<{
@@ -11,29 +15,61 @@ type Context = {
 };
 
 // ------------------------------------------------------------
+// CORS PREFLIGHT
+// ------------------------------------------------------------
+export async function OPTIONS(request: NextRequest) {
+  return corsOptions(request);
+}
+
+// ------------------------------------------------------------
 // PATCH - UPDATE SUPPLIER CODE
 // PATCH /api/suppliers/:id/codes/:codeId
 // ------------------------------------------------------------
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: Context
 ) {
-  const { id, codeId } = await params;
+  const headers = corsHeaders(request);
+
+  const respond = (body: unknown, status = 200) =>
+    NextResponse.json(body, { status, headers });
 
   try {
-    const body = await request.json();
+    const { id, codeId } = await params;
 
-    if (
-      typeof body?.code !== "string" ||
-      !body.code.trim() ||
-      body.code.trim().length > 80
-    ) {
-      return NextResponse.json(
+    let body: unknown;
+
+    try {
+      body = await request.json();
+    } catch {
+      return respond(
         {
           success: false,
-          error: "Valid supplier code is required (max 80 characters).",
+          error: "Invalid JSON body.",
         },
-        { status: 400 }
+        400
+      );
+    }
+
+    const input =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {};
+
+    const code = input.code;
+
+    if (
+      typeof code !== "string" ||
+      !code.trim() ||
+      code.trim().length > 80
+    ) {
+      return respond(
+        {
+          success: false,
+          error:
+            "Valid supplier code is required (max 80 characters).",
+        },
+        400
       );
     }
 
@@ -42,15 +78,18 @@ export async function PATCH(
         id: codeId,
         supplierId: id,
       },
+      select: {
+        id: true,
+      },
     });
 
     if (!existing) {
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           error: "Supplier code not found for this supplier.",
         },
-        { status: 404 }
+        404
       );
     }
 
@@ -60,55 +99,46 @@ export async function PATCH(
         supplierId: id,
       },
       data: {
-        code: body.code.trim().toUpperCase(),
+        code: code.trim().toUpperCase(),
       },
     });
 
-    return NextResponse.json({
+    return respond({
       success: true,
       message: "Supplier code updated successfully.",
       supplierCode,
     });
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      return NextResponse.json(
-        { success: false, error: "Invalid JSON body." },
-        { status: 400 }
-      );
-    }
-
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError
-    ) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === "P2002") {
-        return NextResponse.json(
+        return respond(
           {
             success: false,
             error: "This supplier code already exists.",
           },
-          { status: 409 }
+          409
         );
       }
 
       if (error.code === "P2025") {
-        return NextResponse.json(
+        return respond(
           {
             success: false,
             error: "Supplier code not found.",
           },
-          { status: 404 }
+          404
         );
       }
     }
 
     console.error("[UPDATE SUPPLIER CODE]", error);
 
-    return NextResponse.json(
+    return respond(
       {
         success: false,
         error: "Failed to update supplier code.",
       },
-      { status: 500 }
+      500
     );
   }
 }
@@ -118,22 +148,31 @@ export async function PATCH(
 // DELETE /api/suppliers/:id/codes/:codeId
 // ------------------------------------------------------------
 export async function DELETE(
-  _request: Request,
+  request: NextRequest,
   { params }: Context
 ) {
-  const { id, codeId } = await params;
+  const headers = corsHeaders(request);
+
+  const respond = (body: unknown, status = 200) =>
+    NextResponse.json(body, { status, headers });
 
   try {
-    const result = await prisma.$transaction(async tx => {
+    const { id, codeId } = await params;
+
+    const result = await prisma.$transaction(async (tx) => {
       const existing = await tx.supplierCode.findFirst({
         where: {
           id: codeId,
           supplierId: id,
         },
-        select: { id: true },
+        select: {
+          id: true,
+        },
       });
 
-      if (!existing) return "NOT_FOUND";
+      if (!existing) {
+        return "NOT_FOUND";
+      }
 
       const productCount = await tx.product.count({
         where: {
@@ -156,52 +195,61 @@ export async function DELETE(
     });
 
     if (result === "NOT_FOUND") {
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           error: "Supplier code not found.",
         },
-        { status: 404 }
+        404
       );
     }
 
     if (result === "IN_USE") {
-      return NextResponse.json(
+      return respond(
         {
           success: false,
           error:
             "This supplier code is linked to products. Reassign those products before deleting it.",
         },
-        { status: 409 }
+        409
       );
     }
 
-    return NextResponse.json({
+    return respond({
       success: true,
       message: "Supplier code deleted successfully.",
     });
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2003"
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Supplier code is still linked to a product.",
-        },
-        { status: 409 }
-      );
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === "P2003") {
+        return respond(
+          {
+            success: false,
+            error: "Supplier code is still linked to a product.",
+          },
+          409
+        );
+      }
+
+      if (error.code === "P2025") {
+        return respond(
+          {
+            success: false,
+            error: "Supplier code not found.",
+          },
+          404
+        );
+      }
     }
 
     console.error("[DELETE SUPPLIER CODE]", error);
 
-    return NextResponse.json(
+    return respond(
       {
         success: false,
         error: "Failed to delete supplier code.",
       },
-      { status: 500 }
+      500
     );
   }
 }
