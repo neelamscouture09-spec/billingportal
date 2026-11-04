@@ -1,4 +1,4 @@
-import { Prisma } from "../generated/prisma/client";
+import { Prisma } from ".././generated/prisma/client";
 
 export class TrialError extends Error {
   constructor(message: string, public status = 422) { super(message); }
