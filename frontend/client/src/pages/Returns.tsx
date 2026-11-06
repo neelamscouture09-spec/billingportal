@@ -7,7 +7,7 @@ import { ActionDialog } from "@/components/ActionDialog";
 import { formatINR } from "@/lib/retail";
 import { invalidateProductCache } from "@/lib/productCatalogCache";
 
-const API = (import.meta.env.VITE_API_BASE_URL || "https://billingportal-kappa.vercel.app/").replace(/\/+$/, "");
+const API = (import.meta.env.VITE_API_BASE_URL || "https://billingportal-kappa.vercel.app").replace(/\/+$/, "");
 
 // Matches GET /api/reports/sales?from=YYYY-MM-DD&to=YYYY-MM-DD.
 type SaleItem = {

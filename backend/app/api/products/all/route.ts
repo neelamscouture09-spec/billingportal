@@ -10,14 +10,13 @@ export async function GET(request: NextRequest) {
   const headers = corsHeaders(request);
   try {
     const params = request.nextUrl.searchParams;
-    const sold = params.get("sold") ?? "false";
-    const onTrial = params.get("onTrial") ?? "false";
+    const sold = params.get("sold") ?? "all";
+    const onTrial = params.get("onTrial") ?? "all";
     if (!["true", "false", "all"].includes(sold) || !["true", "false", "all"].includes(onTrial)) {
       return NextResponse.json({ success: false, error: "sold/onTrial must be true, false or all" }, { status: 400, headers });
     }
     const search = params.get("search")?.trim() || "";
     const barcode = params.get("barcode")?.trim() || "";
-    const size = params.get("size")?.trim() || "";
     const supplierName = params.get("supplierName")?.trim() || "";
     const supplierCode = params.get("supplierCode")?.trim() || "";
     const supplierCodeId = params.get("supplierCodeId")?.trim() || "";
@@ -27,7 +26,6 @@ export async function GET(request: NextRequest) {
       ...(onTrial !== "all" ? { onTrial: onTrial === "true" } : {}),
       ...(barcode ? { barcode } : {}),
       ...(supplierCodeId ? { supplierCodeId } : {}),
-      ...(size ? { size: { equals: size, mode: "insensitive" } } : {}),
       ...(supplierCode || supplierName ? { supplierCode: { is: {
         ...(supplierCode ? { code: { equals: supplierCode, mode: "insensitive" as const } } : {}),
         ...(supplierName ? { supplier: { is: { name: { equals: supplierName, mode: "insensitive" as const } } } } : {}),
@@ -35,7 +33,6 @@ export async function GET(request: NextRequest) {
       ...(search ? { AND: [{ OR: [
         { name: { contains: search, mode: "insensitive" } },
         { barcode: { contains: search, mode: "insensitive" } },
-        { size: { contains: search, mode: "insensitive" } },
         { supplierCode: { is: { code: { contains: search, mode: "insensitive" } } } },
         { supplierCode: { is: { supplier: { is: { name: { contains: search, mode: "insensitive" } } } } } },
       ] }] } : {}),
@@ -56,6 +53,11 @@ export async function GET(request: NextRequest) {
         const formatted = formatProduct(p);
         return {
           ...formatted, sold: p.sold, onTrial: p.onTrial, returnStatus: p.returnStatus,
+          // Live stock fields required by Products, Home and Trials.
+          // Never substitute openingStock: that is historical initial inventory.
+          stockQuantity: p.stockQuantity,
+          reservedQuantity: p.reservedQuantity,
+          availableStock: Math.max(0, p.stockQuantity - p.reservedQuantity),
           supplierCodeId: p.supplierCodeId,
           supplierCode: p.supplierCode ? {
             id: p.supplierCode.id, code: p.supplierCode.code,

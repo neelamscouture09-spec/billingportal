@@ -25,10 +25,14 @@ export async function POST(request: NextRequest) {
 
     // Preserve compatibility with the existing createProductSchema, which may
     // still require category. The cashier never enters a category.
-    const parsed = createProductSchema.safeParse({ ...input, category: "Uncategorized" });
+    const parsed = createProductSchema.safeParse({ ...input, size: "ONE_SIZE", category: "Uncategorized" });
     if (!parsed.success)
       return respond({ success: false, error: "Invalid product data", details: parsed.error.flatten() }, 400);
     const data = parsed.data;
+    // Quantity is required for the new grouped-product workflow.
+    const requestedStock = input.openingStock;
+    if (typeof requestedStock !== "number" || !Number.isSafeInteger(requestedStock) || requestedStock < 0 || requestedStock > 2147483647)
+      return respond({ success: false, error: "Opening stock must be a non-negative whole number" }, 400);
 
     const rawSupplierCodeId = input.supplierCodeId;
     if (rawSupplierCodeId !== undefined && rawSupplierCodeId !== null && typeof rawSupplierCodeId !== "string")
@@ -43,17 +47,17 @@ export async function POST(request: NextRequest) {
       const [barcode] = await reserveProductBarcodes(tx, 1);
       return tx.product.create({
         data: {
-          name: data.name, size: data.size, category: "Uncategorized",
+          name: data.name, size: "ONE_SIZE", category: "Uncategorized",
           supplierCodeId,
           sellingPrice: new Prisma.Decimal(data.sellingPrice),
-          openingStock: data.openingStock ?? null,
+          openingStock: requestedStock, stockQuantity: requestedStock, reservedQuantity: 0,
           barcode, sold: false,
         },
         include: { supplierCode: { include: { supplier: true } } },
       });
     }, { maxWait: 10000, timeout: 20000 });
 
-    const result = formatProduct(product);
+    const result = { ...formatProduct(product), stockQuantity: product.stockQuantity, reservedQuantity: product.reservedQuantity, availableStock: product.stockQuantity - product.reservedQuantity };
     return respond({ success: true, message: "Product created successfully", product: result }, 201);
   } catch (error) {
     console.error("[CREATE PRODUCT ERROR]", error);

@@ -54,7 +54,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
           where: { id: { in: body.addedProductIds } },
           include: { supplierCode: { include: { supplier: true } } },
         });
-        if (additional.length !== body.addedProductIds.length || additional.some(p => p.sold || p.onTrial))
+        if (additional.length !== body.addedProductIds.length || additional.some(p => p.stockQuantity - p.reservedQuantity < 1))
           throw new TrialError("Some additional products are unavailable", 409);
         const entries = [
           ...kept.map(i => ({
@@ -99,31 +99,29 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         for (const p of body.refunds) byMethod.set(p.method, (byMethod.get(p.method) ?? BigInt(0)) - BigInt(p.amountPaise));
         if ([...byMethod.values()].some(n => n < BigInt(0)))
           throw new TrialError("Refund method must have sufficient collected amount; choose the original payment method");
-        // Validate reservation ownership before writing anything.
-        for (const i of trial.items) {
-          const product = await tx.product.findUnique({ where: { id: i.productId }, select: { sold: true, onTrial: true } });
-          if (!product || product.sold || !product.onTrial)
-            throw new TrialError(`Trial reservation is missing: ${i.productName}`, 409);
-        }
-        for (const i of returned) {
+        // Reserve/release units for each trial line. A product may be reserved by
+        // more than one open trial, so onTrial Boolean is no longer a stock lock.
+        // Build changes grouped by product ID to support repeated product IDs across trials.
+        const changes = new Map<string, { reserved: number; stock: number }>();
+        const adjust = (productId: string, reserved: number, stock: number) => {
+          const current = changes.get(productId) ?? { reserved: 0, stock: 0 };
+          changes.set(productId, { reserved: current.reserved + reserved, stock: current.stock + stock });
+        };
+        for (const i of returned) adjust(i.productId, -i.quantity, 0);
+        for (const i of kept) adjust(i.productId, -i.quantity, -i.quantity);
+        for (const p of additional) adjust(p.id, 0, -1);
+        for (const [productId, delta] of changes) {
+          const p = await tx.product.findUnique({ where: { id: productId }, select: { stockQuantity: true, reservedQuantity: true } });
+          if (!p) throw new TrialError("Trial product no longer exists", 409);
+          const newStock = p.stockQuantity + delta.stock;
+          const newReserved = p.reservedQuantity + delta.reserved;
+          if (newStock < 0 || newReserved < 0 || newStock < newReserved)
+            throw new TrialError("Trial quantity/stock mismatch. Refresh and retry.", 409);
           const changed = await tx.product.updateMany({
-            where: { id: i.productId, sold: false, onTrial: true },
-            data: { sold: false, onTrial: false },
+            where: { id: productId, stockQuantity: p.stockQuantity, reservedQuantity: p.reservedQuantity },
+            data: { stockQuantity: newStock, reservedQuantity: newReserved },
           });
-          if (changed.count !== 1) throw new TrialError("Unable to release returned trial item", 409);
-        }
-        for (const i of kept) {
-          const changed = await tx.product.updateMany({
-            where: { id: i.productId, sold: false, onTrial: true },
-            data: { sold: true, onTrial: false },
-          });
-          if (changed.count !== 1) throw new TrialError("Unable to finalize kept trial item", 409);
-        }
-        for (const p of additional) {
-          const changed = await tx.product.updateMany({
-            where: { id: p.id, sold: false, onTrial: false }, data: { sold: true },
-          });
-          if (changed.count !== 1) throw new TrialError("Additional product was sold elsewhere", 409);
+          if (changed.count !== 1) throw new TrialError("Stock changed during settlement. Retry.", 409);
         }
         await tx.trialItem.updateMany({ where: { trialId: id, id: { in: kept.map(i => i.id) } }, data: { status: "KEPT" } });
         await tx.trialItem.updateMany({ where: { trialId: id, id: { in: returned.map(i => i.id) } }, data: { status: "RETURNED" } });

@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
         const byId = new Map(products.map(p => [p.id, p]));
         const entries = b.items.map(input => {
           const p = byId.get(input.productId);
-          if (!p || p.sold || p.onTrial) throw new TrialError("One or more selected products are unavailable", 409);
+          if (!p || p.stockQuantity - p.reservedQuantity < 1) throw new TrialError("One or more selected products are out of stock", 409);
           const price = productPricePaise(p.sellingPrice);
           const discount = calculateDiscount(price, input.discountMode, input.discountValue);
           if (safeNumber(discount) !== input.productDiscountPaise)
@@ -108,7 +108,8 @@ export async function POST(req: NextRequest) {
         if (paid > total) throw new TrialError("Trial advance cannot exceed proposed bill total");
         for (const e of entries) {
           const changed = await tx.product.updateMany({
-            where: { id: e.p.id, sold: false, onTrial: false }, data: { onTrial: true },
+            where: { id: e.p.id, stockQuantity: e.p.stockQuantity, reservedQuantity: e.p.reservedQuantity },
+            data: { reservedQuantity: { increment: 1 } },
           });
           if (changed.count !== 1) throw new TrialError(`Product no longer available: ${e.p.name}`, 409);
         }

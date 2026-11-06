@@ -84,11 +84,8 @@ const baseProductSchema = z.object({
     .min(1, "Product name is required")
     .max(200, "Product name cannot exceed 200 characters"),
 
-  size: z
-    .string()
-    .trim()
-    .min(1, "Product size is required")
-    .max(50, "Size cannot exceed 50 characters"),
+  // Retained only for existing invoice/trial snapshots; not a user-entered field.
+  size: z.string().trim().max(50).default("ONE_SIZE"),
 
   category: z
     .string()

@@ -77,6 +77,7 @@ export async function GET(request: NextRequest) {
       subtotalPaise: money(invoice.subtotalPaise),
       productDiscountPaise: money(invoice.productDiscountPaise),
       billDiscountPaise: money(invoice.billDiscountPaise),
+      returnedDiscountPaise: money(invoice.returnedDiscountPaise),
       totalDiscountPaise: money(invoice.totalDiscountPaise),
       totalPaise: money(invoice.totalPaise),
       paidPaise: money(invoice.paidPaise),
@@ -112,6 +113,7 @@ export async function GET(request: NextRequest) {
       totals.totalSalesPaise += row.subtotalPaise;
       totals.productDiscountPaise += row.productDiscountPaise;
       totals.billDiscountPaise += row.billDiscountPaise;
+      totals.returnedDiscountPaise += row.returnedDiscountPaise;
       totals.totalDiscountsPaise += row.totalDiscountPaise;
       totals.revenuePaise += row.totalPaise;
       totals.receivedPaise += row.paidPaise - row.changePaise;
@@ -122,7 +124,7 @@ export async function GET(request: NextRequest) {
       return totals;
     }, {
       transactions: 0, totalSalesPaise: 0, productDiscountPaise: 0,
-      billDiscountPaise: 0, totalDiscountsPaise: 0, revenuePaise: 0,
+      billDiscountPaise: 0, returnedDiscountPaise: 0, totalDiscountsPaise: 0, revenuePaise: 0,
       receivedPaise: 0, itemsSold: 0, paymentsByMethod: {} as Record<string, number>,
     });
 

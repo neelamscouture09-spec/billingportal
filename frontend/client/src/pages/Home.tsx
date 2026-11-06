@@ -34,7 +34,7 @@ import {
 
 const API_BASE_URL = (
 
-  import.meta.env.VITE_API_BASE_URL || "https://billingportal-kappa.vercel.app/"
+  import.meta.env.VITE_API_BASE_URL || "https://billingportal-kappa.vercel.app"
 
 ).replace(/\/+$/, "");
 
@@ -73,6 +73,8 @@ type ApiProduct = {
   sellingPrice: string | number;
 
   openingStock?: number | null;
+  availableStock?: number;
+  stockQuantity?: number;
 
   sold?: boolean;
 
@@ -103,6 +105,7 @@ type Product = {
   pricePaise: number;
 
   openingStock: number | null;
+  availableStock: number;
 
   supplierCodeId: string | null;
 
@@ -357,6 +360,7 @@ function normalizeProduct(row: ApiProduct): Product {
     pricePaise: Math.round(price * 100),
 
     openingStock: row.openingStock ?? null,
+    availableStock: row.availableStock ?? Math.max(0, row.stockQuantity ?? 0),
 
     supplierCodeId: row.supplierCodeId ?? structuredCode?.id ?? null,
 
@@ -534,7 +538,7 @@ export default function Home() {
 
         products: ApiProduct[];
 
-      }>("/api/products/all?sold=false");
+      }>("/api/products/all?sold=all&onTrial=all");
 
       if (!Array.isArray(response.products)) throw new Error("Expected a products array from API.");
 
@@ -542,7 +546,7 @@ export default function Home() {
 
       for (const row of response.products) {
 
-        if (row.sold || row.onTrial) continue;
+        if ((row.availableStock ?? ((row.stockQuantity ?? 0))) <= 0) continue;
 
         const product = normalizeProduct(row);
 
@@ -614,7 +618,7 @@ export default function Home() {
 
   const trackedStock = useMemo(
 
-    () => allProducts.reduce((sum, p) => sum + (p.openingStock ?? 0), 0),
+    () => allProducts.reduce((sum, p) => sum + p.availableStock, 0),
 
     [allProducts]
 
@@ -684,7 +688,7 @@ export default function Home() {
 
       product.name, product.barcode, product.supplierCode,
 
-      product.supplierName, product.category, product.size,
+      product.supplierName, product.category,
 
     ].some(value => value.toLowerCase().includes(term))).slice(0, 12);
 
@@ -745,6 +749,10 @@ export default function Home() {
       if (existing) {
 
         const newQuantity = existing.quantity + 1;
+        if (newQuantity > product.availableStock) {
+          toast.error(`Only ${product.availableStock} units available for ${product.name}`);
+          return current;
+        }
 
         const gross = product.pricePaise * newQuantity;
 
@@ -764,6 +772,10 @@ export default function Home() {
 
       }
 
+      if (product.availableStock < 1) {
+        toast.error(`${product.name} is out of stock`);
+        return current;
+      }
       return [...current, { product, quantity: 1, discountPaise: 0,
 
         discountMode: "fixed", discountValue: 0, selected: false }];
@@ -892,6 +904,11 @@ export default function Home() {
 
     }
 
+    const currentLine = cart.find(line => line.product.id === id);
+    if (currentLine && quantity > currentLine.product.availableStock) {
+      toast.error(`Only ${currentLine.product.availableStock} units are available`);
+      return;
+    }
     setCart(current => current.map(line => {
 
       if (line.product.id !== id) return line;
@@ -1108,6 +1125,9 @@ export default function Home() {
 
     }
 
+    if (cart.some(line => line.quantity > line.product.availableStock)) {
+      return toast.error("Cart exceeds current stock. Refresh products and retry.");
+    }
     if (trialMode && cart.some(line => line.quantity !== 1)) {
 
       return toast.error("Trial mode currently requires one unit per product barcode");
@@ -1523,7 +1543,7 @@ export default function Home() {
 
                     <strong>{product.name}</strong>
 
-                    <small>{product.size} · {product.barcode} · {product.supplierName || "No supplier"} / {product.supplierCode || "—"}</small>
+                    <small>{product.barcode} · {product.availableStock} available · {product.supplierName || "No supplier"} / {product.supplierCode || "—"}</small>
 
                   </span>
 
@@ -1584,7 +1604,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="cart-variant cart-variant-refined">
-                  <span>{line.product.size}</span>
+                  <span>{line.product.availableStock} in stock</span>
                   <small>{line.product.barcode}</small>
                 </div>
                 <div className="quantity-stepper cart-quantity-refined">
@@ -1800,7 +1820,7 @@ export default function Home() {
 
             <div className="payment-confirm-items">{cart.map(line => (
 
-              <div key={line.product.id}><span>{line.product.name} · {line.product.size} × {line.quantity}</span><strong>{formatINR(line.product.pricePaise * line.quantity - line.discountPaise)}</strong></div>
+              <div key={line.product.id}><span>{line.product.name} × {line.quantity}</span><strong>{formatINR(line.product.pricePaise * line.quantity - line.discountPaise)}</strong></div>
 
             ))}</div>
 

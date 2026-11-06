@@ -17,7 +17,6 @@ const MAX_PRODUCTS = 1000;
 
 const HEADERS = [
   "name",
-  "size",
   "supplierName",
   "supplierCode",
   "sellingPrice",
@@ -29,7 +28,6 @@ type Field = (typeof HEADERS)[number];
 type ValidProduct = {
   row: number;
   name: string;
-  size: string;
   supplierName: string | null;
   supplierCode: string | null;
   sellingPrice: string;
@@ -85,7 +83,6 @@ function resolveHeader(value: string): Field | null {
   const aliases: Record<string, Field> = {
     name: "name",
     productname: "name",
-    size: "size",
     suppliername: "supplierName",
     supplier: "supplierName",
     suppliercode: "supplierCode",
@@ -374,8 +371,7 @@ export async function POST(request: NextRequest) {
 
     const required: Field[] = [
       "name",
-      "size",
-      "supplierName",
+          "supplierName",
       "supplierCode",
       "sellingPrice",
     ];
@@ -449,7 +445,6 @@ export async function POST(request: NextRequest) {
       }
 
       const name = getValue("name");
-      const size = getValue("size");
 
       const supplierName = getValue(
         "supplierName"
@@ -479,6 +474,11 @@ export async function POST(request: NextRequest) {
             "Opening stock must be a non-negative whole number",
         });
 
+        continue;
+      }
+
+      if (openingStock === null) {
+        errors.push({ row: excelRow, field: "openingStock", message: "Opening stock is required (0 or greater)" });
         continue;
       }
 
@@ -529,7 +529,7 @@ export async function POST(request: NextRequest) {
 
       const parsed = createProductSchema.safeParse({
         name,
-        size,
+        size: "ONE_SIZE",
         category: "Uncategorized", // Internal compatibility; not an Excel column
 
         // Both fields are required together when supplied.
@@ -560,7 +560,6 @@ export async function POST(request: NextRequest) {
       products.push({
         row: excelRow,
         name: data.name,
-        size: data.size,
         supplierName: data.supplierName || null,
         supplierCode: data.supplierCode
           ? normalizeSupplierCode(data.supplierCode)
@@ -847,7 +846,7 @@ export async function POST(request: NextRequest) {
           const data = resolvedProducts.map(
             (product, index) => ({
               name: product.name,
-              size: product.size,
+              size: "ONE_SIZE",
               category: "Uncategorized", // Legacy required database field
 
               // Store foreign key, not plain text.
@@ -858,6 +857,8 @@ export async function POST(request: NextRequest) {
               ),
 
               openingStock: product.openingStock,
+              stockQuantity: product.openingStock ?? 0,
+              reservedQuantity: 0,
               barcode: barcodes[index],
               sold: false,
             })

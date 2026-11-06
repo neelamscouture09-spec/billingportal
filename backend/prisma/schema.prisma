@@ -10,11 +10,17 @@ datasource db {
 model Product {
   id             String        @id @default(uuid())
   name           String
-  size           String
+  // Legacy compatibility: checkout/trial serializers still refer to size.
+  // Remove this field only after checkout, trials and reports are migrated.
+  size           String        @default("ONE_SIZE")
   category       String
   sellingPrice   Decimal       @db.Decimal(12, 2)
   barcode        String        @unique
   openingStock   Int?
+  // Live quantity: this is what sales and returns will update atomically.
+  stockQuantity  Int           @default(0)
+  // Units currently held in open trials; available = stockQuantity - reservedQuantity.
+  reservedQuantity Int         @default(0)
   sold           Boolean       @default(false)
   onTrial        Boolean       @default(false)
   trialItems     TrialItem[]

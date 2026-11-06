@@ -70,23 +70,20 @@ import { formatINR, toPaise } from "@/lib/retail";
 
 const API_BASE_URL = (
 
-  import.meta.env.VITE_API_BASE_URL || "https://billingportal-kappa.vercel.app/"
-
+  import.meta.env.VITE_API_BASE_URL || "https://billingportal-kappa.vercel.app"
 ).replace(/\/+$/, "");
 
 const PRODUCT_API = `${API_BASE_URL}/api/products`;
 
-const CACHE_KEY = "neelam-products-cache-v3-suppliers";
+const CACHE_KEY = "neelam-products-cache-v5-stock-verified";
 
 const MAX_IMPORT_ROWS = 1000;
 
 const MAX_IMPORT_SIZE = 5 * 1024 * 1024;
 
-const sizes = ["S", "M", "L", "XL", "XXL"];
-
 const EXCEL_HEADERS = [
 
-  "name", "size", "supplierName", "supplierCode", "sellingPrice", "openingStock",
+  "name", "supplierName", "supplierCode", "sellingPrice", "openingStock",
 
 ] as const;
 
@@ -102,7 +99,11 @@ type Product = {
 
   name: string;
 
-  size: string;
+  stockQuantity: number;
+
+  reservedQuantity?: number;
+
+  availableStock?: number;
 
   supplierCodeId?: string | null;
 
@@ -128,8 +129,6 @@ type ProductForm = {
 
   name: string;
 
-  size: string;
-
   supplierCodeId: string;
 
   price: string;
@@ -143,8 +142,6 @@ type ImportRow = {
   sourceRow: number;
 
   name: string;
-
-  size: string;
 
   supplierName: string;
 
@@ -276,8 +273,6 @@ function blankForm(): ProductForm {
 
     name: "",
 
-    size: "M",
-
     supplierCodeId: "",
 
 
@@ -300,6 +295,12 @@ function readProductCache(): Product[] | null {
     const parsed: unknown = JSON.parse(raw);
 
     if (!Array.isArray(parsed)) return null;
+
+    // Never display cached records created by an older API that omitted stockQuantity.
+    if (!parsed.every(item => item && typeof item === "object" &&
+      Number.isSafeInteger(item.stockQuantity) && item.stockQuantity >= 0 &&
+      Number.isSafeInteger(item.reservedQuantity ?? 0) &&
+      (item.reservedQuantity ?? 0) <= item.stockQuantity)) return null;
 
     return parsed as Product[];
 
@@ -582,8 +583,6 @@ export default function Products() {
   const [search, setSearch] = useState("");
 
 
-  const [size, setSize] = useState("All sizes");
-
   const [priceMin, setPriceMin] = useState("");
 
   const [priceMax, setPriceMax] = useState("");
@@ -620,9 +619,18 @@ export default function Products() {
 
     try {
 
-      const result = await apiRequest<ProductsResponse>("/all?sold=false");
+      const result = await apiRequest<ProductsResponse>("/all?sold=all&onTrial=all");
 
       const fetched = result.products ?? [];
+
+      // Stock must come from the current quantity-based backend, not openingStock.
+      // Do not silently show "Not tracked" or an incorrect historic quantity.
+      if (fetched.some(p => !Number.isSafeInteger(p.stockQuantity) || p.stockQuantity < 0 ||
+        !Number.isSafeInteger(p.reservedQuantity ?? 0) ||
+        (p.reservedQuantity ?? 0) > p.stockQuantity)) {
+        setProducts([]);
+        throw new Error("Products API is not returning live stockQuantity. Deploy backend/app/api/products/all/route.ts and verify the quantity schema, then refresh.");
+      }
 
       setProducts(fetched);
 
@@ -672,7 +680,7 @@ export default function Products() {
 
     return products.filter((product) => {
 
-      if (product.sold) return false;
+      // Include out-of-stock entries so staff can find them and restock later.
 
       const searchable = [
 
@@ -689,8 +697,6 @@ export default function Products() {
       if (!searchable) return false;
 
 
-      if (size !== "All sizes" && product.size !== size) return false;
-
       const pricePaise = Math.round(Number(product.sellingPrice) * 100);
 
       if (priceMin !== "" && pricePaise < toPaise(priceMin)) return false;
@@ -701,15 +707,7 @@ export default function Products() {
 
     });
 
-  }, [products, search, size, priceMin, priceMax]);
-
-  const availableSizes = useMemo(
-
-    () => [...new Set([...sizes, ...products.map((p) => p.size)])],
-
-    [products]
-
-  );
+  }, [products, suppliers, search, priceMin, priceMax]);
 
   const selectedDeleteProduct = useMemo(
 
@@ -741,8 +739,6 @@ export default function Products() {
 
       name: product.name,
 
-      size: product.size,
-
       supplierCodeId: getSupplierDetails(product, suppliers).id,
 
 
@@ -750,7 +746,7 @@ export default function Products() {
 
       onHand:
 
-        product.openingStock === null ? "" : String(product.openingStock),
+        String(product.stockQuantity ?? 0),
 
     });
 
@@ -784,17 +780,11 @@ export default function Products() {
 
     const openingStock =
 
-      form.onHand.trim() === "" ? null : Number(form.onHand);
+      form.onHand.trim() === "" ? NaN : Number(form.onHand);
 
-    if (
+    if (!Number.isSafeInteger(openingStock) || openingStock < 0 || openingStock > 2147483647) {
 
-      openingStock !== null &&
-
-      (!Number.isSafeInteger(openingStock) || openingStock < 0)
-
-    ) {
-
-      toast.error("Opening stock must be a non-negative whole number");
+      toast.error("Stock must be a non-negative whole number");
 
       return;
 
@@ -804,18 +794,16 @@ export default function Products() {
 
       name: form.name.trim(),
 
-      size: form.size.trim(),
-
 
       supplierCodeId: form.supplierCodeId || null,
 
       sellingPrice: form.price.trim(),
 
-      openingStock,
+      ...(editing ? { stockQuantity: openingStock } : { openingStock }),
 
     };
 
-    if (!payload.name || !payload.size) {
+    if (!payload.name) {
 
       toast.error("Please fill all required fields");
 
@@ -931,23 +919,23 @@ export default function Products() {
 
         [...EXCEL_HEADERS],
 
-        ["Classic Shirt", "M", "ABC Textiles", "ABC001", 1499, 1],
+        ["Saree", "ABC Textiles", "ABC12", 1500, 4],
 
-        ["Straight Jeans", "32", "ABC Textiles", "ABC002", 1999, 5],
+        ["Saree", "ABC Textiles", "ABC13", 1999, 5],
 
-        ["Casual Kurti", "L", "New Fashion", "NF001", 899, 10],
+        ["Kurti", "New Fashion", "NF001", 899, 10],
 
-        ["Printed Dress", "S", "New Fashion", "NF001", 1099, 8],
+        ["Dress", "New Fashion", "NF001", 1099, 8],
 
-        ["Kids T-Shirt", "S", "New Fashion", "NF002", 499, 12],
+        ["Kids T-Shirt", "New Fashion", "NF002", 499, 12],
 
       ]);
 
       worksheet["!cols"] = [
 
-        { wch: 30 }, { wch: 12 }, { wch: 26 },
+        { wch: 30 }, { wch: 26 }, { wch: 22 },
 
-        { wch: 22 }, { wch: 18 }, { wch: 18 },
+        { wch: 18 }, { wch: 18 },
 
       ];
 
@@ -1045,7 +1033,7 @@ export default function Products() {
 
         }
 
-        const [name, rowSize, supplierName, supplierCode, rawPrice, rawStock] =
+        const [name, supplierName, supplierCode, rawPrice, rawStock] =
 
           cells.map((value) => String(value ?? "").trim());
 
@@ -1057,12 +1045,8 @@ export default function Products() {
 
         if (!name) errors.push("Product name required");
 
-        if (!rowSize) errors.push("Size required");
-
 
         if (name.length > 200) errors.push("Product name too long (max 200)");
-
-        if (rowSize.length > 50) errors.push("Size too long (max 50)");
 
 
         if (Boolean(supplierName) !== Boolean(supplierCode)) errors.push("Supplier name and code must be entered together");
@@ -1094,8 +1078,6 @@ export default function Products() {
           sourceRow: index + 2,
 
           name,
-
-          size: rowSize,
 
 
           supplierName,
@@ -1268,7 +1250,7 @@ export default function Products() {
 
         if (existing) {
 
-          existing.copies += 1;
+          existing.copies += Math.max(1, Number(product.availableStock ?? product.stockQuantity ?? 1));
 
         } else {
 
@@ -1278,7 +1260,7 @@ export default function Products() {
 
             product,
 
-            copies: 1,
+            copies: Math.max(1, Number(product.availableStock ?? product.stockQuantity ?? 1)),
 
           });
 
@@ -1674,7 +1656,7 @@ export default function Products() {
 
           <h1>Products</h1>
 
-          <p>Keep styles, sizes, barcodes, prices, and label printing in one place.</p>
+          <p>Manage product quantities, supplier codes, selling prices and barcode labels.</p>
 
         </div>
 
@@ -1707,26 +1689,6 @@ export default function Products() {
             />
 
           </label>
-
-          <select
-
-            className="select-control"
-
-            value={size}
-
-            onChange={(event) => setSize(event.target.value)}
-
-          >
-
-            <option>All sizes</option>
-
-            {availableSizes.map((option) => (
-
-              <option key={option}>{option}</option>
-
-            ))}
-
-          </select>
 
           <label className="search-field price-filter">
 
@@ -1990,8 +1952,6 @@ export default function Products() {
 
                 <th>PRODUCT</th>
 
-                <th>SIZE</th>
-
                 <th>SUPPLIER CODE</th>
 
 
@@ -2053,12 +2013,6 @@ export default function Products() {
 
                     <td>
 
-                      <span className="badge">{product.size}</span>
-
-                    </td>
-
-                    <td>
-
                       <div>{getSupplierDetails(product, suppliers).code || "—"}</div>
 
                       <small style={{ color: "#64748b" }}>{getSupplierDetails(product, suppliers).name}</small>
@@ -2088,9 +2042,9 @@ export default function Products() {
 
                     <td>
 
-                      {product.openingStock === null ? (
+                      {!Number.isSafeInteger(product.stockQuantity) ? (
 
-                        <span className="stock-untracked">Not tracked</span>
+                        <span className="stock-untracked">Stock unavailable</span>
 
                       ) : (
 
@@ -2098,13 +2052,13 @@ export default function Products() {
 
                           className={
 
-                            product.openingStock < 5 ? "stock-low" : "stock-good"
+                            (product.availableStock ?? product.stockQuantity) < 5 ? "stock-low" : "stock-good"
 
                           }
 
                         >
 
-                          {product.openingStock} units
+                          {product.availableStock ?? product.stockQuantity} units
 
                         </span>
 
@@ -2288,42 +2242,6 @@ export default function Products() {
 
               <label className="field">
 
-                <span>SIZE</span>
-
-                <input
-
-                  required
-
-                  maxLength={50}
-
-                  list="common-sizes"
-
-                  value={form.size}
-
-                  onChange={(event) =>
-
-                    setForm({ ...form, size: event.target.value })
-
-                  }
-
-                  placeholder="Choose or enter a size"
-
-                />
-
-                <datalist id="common-sizes">
-
-                  {sizes.map((item) => (
-
-                    <option key={item} value={item} />
-
-                  ))}
-
-                </datalist>
-
-              </label>
-
-              <label className="field">
-
                 <span>SUPPLIER &amp; CODE</span>
 
                 <select
@@ -2422,7 +2340,7 @@ export default function Products() {
 
                 <span>
 
-                  OPENING STOCK <em>OPTIONAL</em>
+                  {editing ? "CURRENT STOCK (UNITS)" : "OPENING STOCK"}
 
                 </span>
 
@@ -2434,6 +2352,7 @@ export default function Products() {
 
                   step="1"
 
+
                   value={form.onHand}
 
                   onChange={(event) =>
@@ -2442,7 +2361,7 @@ export default function Products() {
 
                   }
 
-                  placeholder="Leave blank if you do not track stock"
+                  placeholder="0"
 
                 />
 
@@ -2582,8 +2501,6 @@ export default function Products() {
 
                         <th>PRODUCT</th>
 
-                        <th>SIZE</th>
-
                         <th>SUPPLIER NAME</th>
 
                         <th>SUPPLIER CODE</th>
@@ -2608,8 +2525,6 @@ export default function Products() {
                           <td>{row.sourceRow}</td>
 
                           <td>{row.name || "—"}</td>
-
-                          <td>{row.size || "—"}</td>
 
                           <td>{row.supplierName || "—"}</td>
 

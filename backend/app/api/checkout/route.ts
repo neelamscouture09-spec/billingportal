@@ -211,7 +211,7 @@ export async function POST(req: NextRequest) {
         const productMap = new Map(products.map(p => [p.id, p]));
         const entries = body.items.map((item, index) => {
           const product = productMap.get(item.productId);
-          if (!product || product.sold || product.onTrial) throw new CheckoutError(`Unavailable product at row ${index + 1}`, 409);
+          if (!product || product.stockQuantity - product.reservedQuantity < item.quantity) throw new CheckoutError(`Insufficient available stock at row ${index + 1}`, 409);
           const price = new Prisma.Decimal(product.sellingPrice.toString()).mul(100);
           if (!price.isInteger()) throw new CheckoutError(`Invalid price for ${product.name}`);
           const unit = BigInt(price.toFixed(0));
@@ -257,12 +257,18 @@ export async function POST(req: NextRequest) {
         if (change > cashPaid) throw new CheckoutError("Change can only come from cash tender");
         for (const amount of [subtotal, productDiscount, billDiscount, returnedDiscount, totalDiscount, total, paid, change]) safe(amount);
 
-        // One product record is one saleable item; intentionally no stock updates.
+        // A sale changes only this product ID, not other products with the same supplier code.
+        // Guard the snapshot quantities to prevent stale or concurrent stock deductions.
         for (const entry of entries) {
           const changed = await tx.product.updateMany({
-            where: { id: entry.product.id, sold: false, onTrial: false }, data: { sold: true },
+            where: {
+              id: entry.product.id,
+              stockQuantity: entry.product.stockQuantity,
+              reservedQuantity: entry.product.reservedQuantity,
+            },
+            data: { stockQuantity: { decrement: entry.item.quantity } },
           });
-          if (changed.count !== 1) throw new CheckoutError(`Already sold: ${entry.product.name}`, 409);
+          if (changed.count !== 1) throw new CheckoutError(`Stock changed for ${entry.product.name}. Refresh and retry.`, 409);
         }
 
         const invoiceDate = new Date();

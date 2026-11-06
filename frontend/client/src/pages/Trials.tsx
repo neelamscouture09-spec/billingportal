@@ -12,7 +12,7 @@ type PaymentRow = { id: string; method: Method; amount: string };
 const createPaymentRow = (method: Method = "Cash", amount = ""): PaymentRow => ({
   id: crypto.randomUUID(), method, amount,
 });
-type Product = { id: string; name: string; size: string; barcode: string; sellingPrice: string | number };
+type Product = { id: string; name: string; size: string; barcode: string; sellingPrice: string | number; availableStock?: number; stockQuantity?: number };
 type TrialItem = { id: string; productId: string; productName: string; barcode: string; size: string;
   unitPricePaise: number; productDiscountPaise: number; netPaise: number; status: string; source?: string };
 type TrialPayment = { id: string; kind: string; method: string; amountPaise: number; createdAt: string };
@@ -241,8 +241,8 @@ export default function Trials() {
     setKept(Object.fromEntries(trial.items.map(i => [i.id, i.status === "ON_TRIAL"])));
     setAdded([]); setPayments([createPaymentRow()]); setRefunds([createPaymentRow()]); setExtraSearch("");
     try {
-      const data = await request<{ products: Product[] }>("/api/products/all?sold=false");
-      setMore(data.products);
+      const data = await request<{ products: Product[] }>("/api/products/all?sold=all&onTrial=all");
+      setMore(data.products.filter(p => (p.availableStock ?? p.stockQuantity ?? 0) > 0));
     } catch (e) { toast.error(e instanceof Error ? e.message : "Cannot load additional products"); }
   }
 
@@ -367,7 +367,7 @@ export default function Trials() {
             <tbody>{selected.items.map(i => <tr key={i.id}>
               <td><input type="checkbox" disabled={selected.status !== "OPEN"} checked={!!kept[i.id]}
                 onChange={e => setKept(old => ({ ...old, [i.id]: e.target.checked }))}/></td>
-              <td><strong>{i.productName}</strong><div className="table-sub">{i.size} · {i.barcode}</div></td>
+              <td><strong>{i.productName}</strong><div className="table-sub">{i.barcode}</div></td>
               <td>{money(i.unitPricePaise)}</td><td>{money(i.productDiscountPaise)}</td><td>{money(i.netPaise)}</td><td>{i.status}</td>
             </tr>)}</tbody></table></div></section>
           {selected.status === "OPEN" && <section>
