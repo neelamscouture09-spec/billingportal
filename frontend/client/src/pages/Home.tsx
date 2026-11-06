@@ -8,7 +8,7 @@ import {
 
   Minus, Package, PackagePlus, Plus, RefreshCw, Search, ShoppingBag, Edit3,
 
-  Trash2, UserRound, Wallet, X, AlertCircle, Building2,
+  Trash2, UserRound, Wallet, X, AlertCircle, Building2, Printer,
 
 } from "lucide-react";
 
@@ -19,6 +19,7 @@ import { toast } from "sonner";
 import RetailLayout from "@/components/RetailLayout";
 
 import { Button } from "@/components/ui/button";
+import { buildReceiptPdf, type ReceiptInvoice } from "@/lib/receiptPdf";
 
 import { Input } from "@/components/ui/input";
 
@@ -493,6 +494,7 @@ export default function Home() {
   const [paymentConfirmOpen, setPaymentConfirmOpen] = useState(false);
 
   const [checkoutPending, setCheckoutPending] = useState(false);
+  const [receiptPrinting, setReceiptPrinting] = useState(false);
 
   const [successInfo, setSuccessInfo] = useState<{
 
@@ -1366,6 +1368,39 @@ export default function Home() {
 
   }
 
+  async function printSavedReceipt(invoiceId: string | number) {
+    if (receiptPrinting) return;
+    // Open before fetching: browsers otherwise often block the print viewer.
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast.error("Allow pop-ups to open the receipt print view");
+      return;
+    }
+    printWindow.document.title = "Preparing A5 receipt...";
+    printWindow.document.body.textContent = "Preparing receipt print view...";
+    setReceiptPrinting(true);
+    try {
+      // The saved invoice is the source of truth for products and payment amounts.
+      const response = await requestJson<{ success: boolean; invoice: ReceiptInvoice }>(
+        `/api/checkout?invoiceId=${encodeURIComponent(String(invoiceId))}`
+      );
+      if (!response.invoice?.invoiceNumber || !Array.isArray(response.invoice.items)) {
+        throw new Error("Saved receipt details were not returned by the backend");
+      }
+      const doc = await buildReceiptPdf(response.invoice, false);
+      doc.autoPrint();
+      const url = URL.createObjectURL(doc.output("blob"));
+      printWindow.location.replace(url);
+      toast.success("A5 receipt opened in print view");
+      // Keep the object URL valid while the browser PDF viewer is open.
+    } catch (error) {
+      printWindow.close();
+      toast.error(error instanceof Error ? error.message : "Could not open the receipt");
+    } finally {
+      setReceiptPrinting(false);
+    }
+  }
+
   return (
 
     <RetailLayout>
@@ -1936,7 +1971,14 @@ export default function Home() {
 
             <div className="success-payment-list">{successInfo.tenders.map(tender => <div key={tender.method}><span>{tender.method}</span><strong>{formatINR(tender.amountPaise)}</strong></div>)}</div>
 
-            <button type="button" className="btn-primary" onClick={() => setSuccessInfo(null)}>New bill</button>
+            <div className="modal-footer" style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              <button type="button" className="btn-outline" onClick={() => setSuccessInfo(null)}>New bill</button>
+              <button type="button" className="btn-primary" disabled={receiptPrinting}
+                onClick={() => void printSavedReceipt(successInfo.id)}>
+                {receiptPrinting ? <Loader2 size={15} className="animate-spin" /> : <Printer size={15} />}
+                {receiptPrinting ? "Preparing print..." : "Print receipt"}
+              </button>
+            </div>
 
           </div>
 
