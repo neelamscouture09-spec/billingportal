@@ -174,15 +174,18 @@ model ReturnLine {
   id              String       @id @default(uuid())
   batchId         String
   batch           ReturnBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  invoiceItemId   String       @unique
+  invoiceItemId   String
   invoiceItem     CheckoutItem @relation(fields: [invoiceItemId], references: [id], onDelete: Restrict)
   productId       String
   quantity        Int
+  returnedBefore  Int          @default(0) // Quantity returned before this batch, for exact partial-return allocation
   originalPaise   BigInt
   creditPaise     BigInt
   includeDiscount Boolean
   reason          String       @db.VarChar(100)
 
+  @@index([invoiceItemId])
+  @@unique([invoiceItemId, returnedBefore])
   @@map("return_lines")
 }
 

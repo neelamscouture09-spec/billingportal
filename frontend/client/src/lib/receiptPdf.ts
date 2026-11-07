@@ -423,6 +423,5 @@ export async function buildReceiptPdf(invoice: ReceiptInvoice, includeBackground
   }
 
   return doc;
-
 }
 
