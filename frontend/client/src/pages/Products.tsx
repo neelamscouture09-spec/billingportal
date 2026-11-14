@@ -71,6 +71,7 @@ import { formatINR, toPaise } from "@/lib/retail";
 const API_BASE_URL = (
 
   import.meta.env.VITE_API_BASE_URL || "https://billingportal-kappa.vercel.app"
+  // import.meta.env.VITE_API_BASE_URL || "http://localhost:3001"
 ).replace(/\/+$/, "");
 
 const PRODUCT_API = `${API_BASE_URL}/api/products`;

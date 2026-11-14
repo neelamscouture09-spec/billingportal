@@ -21,6 +21,7 @@ model Product {
   stockQuantity  Int           @default(0)
   // Units currently held in open trials; available = stockQuantity - reservedQuantity.
   reservedQuantity Int         @default(0)
+  isArchived       Boolean     @default(false)
   sold           Boolean       @default(false)
   onTrial        Boolean       @default(false)
   trialItems     TrialItem[]
@@ -36,6 +37,7 @@ model Product {
   @@index([sold])
   @@index([onTrial])
   @@index([returnStatus])
+  @@index([isArchived])
   @@map("products")
 }
 
@@ -170,15 +172,19 @@ model ReturnBatch {
   @@map("return_batches")
 }
 
+
 model ReturnLine {
   id              String       @id @default(uuid())
   batchId         String
   batch           ReturnBatch  @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
   invoiceItemId   String
   invoiceItem     CheckoutItem @relation(fields: [invoiceItemId], references: [id], onDelete: Restrict)
+
   productId       String
   quantity        Int
-  returnedBefore  Int          @default(0) // Quantity returned before this batch, for exact partial-return allocation
+  returnedBefore  Int          @default(0)
+
   originalPaise   BigInt
   creditPaise     BigInt
   includeDiscount Boolean
